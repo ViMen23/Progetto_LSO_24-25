@@ -1,43 +1,65 @@
+#include "server.h"
+#include "../utils/epoll.h"
+#include "config.h"
+#include "../player/player.h"
+#include "../global_info.h"
+
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <errno.h>
 
-#include "server.h"
 
 
-int add_epoll_interest(int fd, uint32_t flags)
-{
-    struct epoll_event ev;
+int init_server(int port) {
+    memset(&server, 0, sizeof(server));
 
-    ev.events = flags;
-    ev.data.fd = fd;
-
-    if ( (epoll_ctl(server.epoll_fd, EPOLL_CTL_ADD, fd, &ev)) == -1) {
-        perror("epoll add interest failure");
+    if ( (server.server_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0)) < 0) {
+        perror("socket not created");
         return -1;
     }
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+
+    if (bind(server.server_fd, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0) {
+        perror("server bind failure");
+        close(server.server_fd);
+        return -1;
+    }
+
+    if (listen(server.server_fd, LIS_QUEUE_MAX_SIZE) < 0) {
+        perror("server listen failure");
+        close(server.server_fd);
+        return -1;
+    }
+
+    
+    if ( (server.epoll_fd = epoll_create1(EPOLL_CLOEXEC)) == -1) {
+        perror("epoll socket not created");
+        close(server.server_fd);
+        return -1;
+    }
+
+    if (add_epoll_interest(server.server_fd, server.epoll_fd, EPOLLIN | EPOLLET) == -1) {
+        close(server.server_fd);
+        close(server.epoll_fd);
+        return -1;
+    }
+
+    server.running = 1;
 
     return 0;
 }
 
-int removeNclean_epoll_interest(int fd) {
-    if ( epoll_ctl(server.epoll_fd, EPOLL_CTL_DEL, fd, NULL) == -1 ) {
-        perror("epoll del interest failure");
-        close(fd);
-        return -1;
-    }
-
-    close(fd);
-    return 0;
-}
-
-bool stop_server()
+int stop_server()
 {
-    server.running = 0;
-
-    return true;
+    return (server.running = 0) != 0;
 }
 
 int run_server()
@@ -83,22 +105,23 @@ int run_server()
             if( (flags & EPOLLERR) || (flags & EPOLLHUP) ) {
                 fprintf(stderr, "epoll error on fd %d\n", fd);
                 
-                removeNclean_epoll_interest(fd);
+                removeNclean_epoll_interest(server.epoll_fd, fd);
                 continue;
             }
 
             if(flags & EPOLLIN) {
 
                 if(fd == server.server_fd) {
-                    accept_new_player();
+                    const char* name = "ciao"; // TODO to implement
+                    accept_new_player(name);
                     continue;
                 }
 
             }
 
             if (flags & EPOLLRDHUP) {
-                fprintf("client associated to fd %d has closed the connection\n", fd);
-                removeNclean_epoll_interest(fd);
+                fprintf(stderr, "client associated to fd %d has closed the connection\n", fd);
+                removeNclean_epoll_interest(server.epoll_fd, fd);
             }
 
         
@@ -110,11 +133,12 @@ int run_server()
     }
 }
 
-static int accept_new_player() {
+static int accept_new_player(const char* name) {
     struct sockaddr_in client_addr;
     struct sockaddr_in server_addr;
 
-    int fd = accept(server.server_fd, (struct sockaddr *) &client_addr, sizeof(client_addr));
+    socklen_t client_size = sizeof(client_addr);
+    int fd = accept4(server.server_fd, (struct sockaddr *) &client_addr, &client_size, SOCK_NONBLOCK);
 
     if (fd == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
         perror("accept failure");
@@ -122,6 +146,15 @@ static int accept_new_player() {
     }
 
     printf("New Player connected and associated to fd %d\n", fd);
+    
+    if ( add_epoll_interest(server.epoll_fd, fd, EPOLLIN | EPOLLRDHUP | EPOLLET) == -1)
+        return -1;
 
-    return add_epoll_interest(fd, EPOLLIN | EPOLLRDHUP | EPOLLET);
+    player_t *new_player = register_player(fd, name);
+
+    if(!new_player)
+        return -1;
+
+    
+    add_global_player(new_player);
 }
