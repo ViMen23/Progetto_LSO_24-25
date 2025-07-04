@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
 
     run_server(&ctx);
 
-
+    // clean up logic
     close(signal_pipe[0]);
     close(signal_pipe[1]);
 }

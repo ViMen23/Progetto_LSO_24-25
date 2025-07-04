@@ -3,6 +3,7 @@
 #include "../utils/utils.h"
 #include "../context/context_manager.h"
 #include "../player/player.h"
+#include "../thread/thread.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -33,14 +34,13 @@ int init_server(app_context_t* ctx, int port) {
         return -1;
     }
 
-    // TO QUESTION THE SECOND ARGUMENT  
-    if (listen(ctx->server_fd, LIS_QUEUE_MAX_SIZE) < 0) {
+    // BACK_LOG_SIZE is the size of the queue of connection sended by a client and not yet processed 
+    if (listen(ctx->server_fd, BACK_LOG_SIZE) < 0) {
         perror("server listen failure");
         close(ctx->server_fd);
         return -1;
     }
 
-    
     if ( (ctx->epoll_fd = epoll_create1(EPOLL_CLOEXEC)) == -1) {
         perror("epoll socket not created");
         close(ctx->server_fd);
@@ -58,6 +58,15 @@ int init_server(app_context_t* ctx, int port) {
         close(ctx->epoll_fd);
         return -1;
     }
+
+
+    if (thread_pool_create(ctx->pool, NUM_THREAD, QUEUE_CAPACITY) == -1) {
+        close(ctx->server_fd);
+        close(ctx->epoll_fd);
+        return -1;
+    }
+
+    ctx->server_running = 1;
     
     return 0;
 }
@@ -69,11 +78,9 @@ void stop_server(app_context_t* ctx)
 
 void run_server(app_context_t* ctx)
 {
-    // why do I not need to do memset 0 to this?
     struct epoll_event events[MAX_EVENTS];
 
-    printf("Server started\n");
-    printf("Press CTRL+C to terminate the server\n");
+    printf("Server started\nPress CTRL+C to terminate the server\n");
 
 
     while(ctx->server_running) {
@@ -96,8 +103,6 @@ void run_server(app_context_t* ctx)
             }
         */
         int n = epoll_wait(ctx->epoll_fd, events, MAX_EVENTS, -1);
-
-
         if (n == -1) {
             perror("epoll wait failure");
             break;
@@ -109,45 +114,37 @@ void run_server(app_context_t* ctx)
             int fd = events[i].data.fd;
             uint32_t flags = events[i].events;
 
-            // TODO it has to do something else, like removing the player and his lobbies from the global
-            if ( (flags & EPOLLERR) || (flags & EPOLLHUP) ) {
-                fprintf(stderr, "epoll error on fd %d\n", fd);
-                
-                removeNclean_epoll_interest(ctx->epoll_fd, fd);
+
+            if (fd == ctx->signal_pipe[0]) {
+                printf("Received signal, stopping server...\n");
+                stop_server(ctx);
+                break;
+            }
+
+            if ((flags & EPOLLERR) || (flags & EPOLLHUP) || (flags & EPOLLRDHUP)) {
+                handle_player_disconnect(ctx, fd);
+                continue;
+            }
+            
+            if (fd == ctx->server_fd) {
+                int client_fd;
+
+                while ( (client_fd = accept_new_player(ctx)) != -1) {
+                    const char* name = "ciao";
+                    add_player(ctx, client_fd, name);
+                }
                 continue;
             }
 
+            
+
             if (flags & EPOLLIN) {
+                // TODO
 
-                // TODO to implement
-                if (fd == ctx->server_fd) {
-                    int client_fd;
-
-                    if ((client_fd = accept_new_player(ctx)) == -1) {
-                        return -1;
-                    }
-
-                    const char* name = "ciao";
-                    if (add_player(ctx, client_fd, name) == -1) {
-                        return -1;
-                    }
-                    continue;
-                }
-
-
-                if (fd == ctx->signal_pipe[0]) {
-                    printf("Received signal, stopping server...\n");
-                    stop_server(ctx);
-                    break;
-                }
-
+                // add task to thread pool
             }
-
             // TODO it has to do something else, like removing the player and his lobbies from the global
-            if (flags & EPOLLRDHUP) {
-                fprintf(stderr, "client associated to fd %d has closed the connection\n", fd);
-                removeNclean_epoll_interest(ctx->epoll_fd, fd);
-            }
+            
 
         
             // TODO
@@ -180,14 +177,26 @@ static int accept_new_player(app_context_t *ctx)
 
 static int add_player(app_context_t *ctx, int client_fd, const char *name)
 {
-    if ( add_epoll_interest(ctx->epoll_fd, client_fd, EPOLLIN | EPOLLRDHUP | EPOLLET) == -1)
+    if ( add_epoll_interest(ctx->epoll_fd, client_fd, EPOLLIN | EPOLLRDHUP | EPOLLET) == -1) {
+        close(client_fd);
         return -1;
+    }
 
     player_t *new_player = register_player(client_fd, name);
 
-    if(!new_player)
+    if(!new_player) {
+        removeNclean_epoll_interest(ctx->epoll_fd, client_fd);
         return -1;
+    }
 
     context_add_player(ctx, new_player);
     return 0;
+}
+
+
+static void handle_player_disconnect(app_context_t *ctx, int player_fd) 
+{
+    // TODO it has to do something else, like removing the player and his lobbies from the global
+    fprintf(stderr, "PLayer on fd %d disconnected. Cleaning up.\n", player_fd);
+    removeNclean_epoll_interest(ctx->epoll_fd, player_fd);
 }

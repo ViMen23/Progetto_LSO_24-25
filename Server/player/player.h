@@ -1,20 +1,13 @@
 #ifndef PLAYER_H
 #define PLAYER_H
-#define MAX_LOBBY 5
-#define NAME_LEN 32
 
-
-#include "lobby.h"
-#include "../external/uthash.h"
-
-
-#include <stdatomic.h>
-
-static atomic_ullong counter = 0;
+#include "../game/lobby.h"
+#include "../config.h"
 
 typedef struct player {
     unsigned long long int id;
     char name[NAME_LEN];
+    char token[B64_TOKEN_LEN];
     int fd;
     int is_playing: 1;
     lobby_t lobby[MAX_LOBBY];

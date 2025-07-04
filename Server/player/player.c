@@ -1,6 +1,49 @@
 #include "player.h"
 
+#include <openssl/rand.h>
+#include <openssl/bio.h>    
+#include <openssl/evp.h>    
+#include <openssl/buffer.h> 
 #include <stdio.h>
+#include <stdatomic.h>
+
+
+static atomic_ullong counter = 0;
+
+
+static int generate_token(char *buf, size_t len)
+{
+    unsigned char raw_token[RAW_TOKEN_LEN];
+
+    if (RAND_bytes(raw_token, sizeof(raw_token)) != 1) {
+        fprintf(stderr, "Failed to generate token\n");
+        return -1;
+    }
+
+    BIO *bio, *b64;
+    BUF_MEM *bufferPtr;
+
+    b64 = BIO_new(BIO_f_base64());
+    bio = BIO_new(BIO_s_mem());
+    bio = BIO_push(b64, bio);
+
+    BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
+    BIO_write(bio, raw_token, sizeof(raw_token));
+    BIO_flush(bio);
+    BIO_get_mem_ptr(bio, &bufferPtr);
+
+    if (bufferPtr->length < len) {
+        memcpy(buf, bufferPtr->data, bufferPtr->length);
+        buf[bufferPtr->length] = '\0';
+    } else {
+        fprintf(stderr, "ERROR: Base64 output is too large for buffer.\n");
+        BIO_free_all(bio);
+        return -1;
+    }
+
+    BIO_free_all(bio);
+    return 0;
+}
 
 player_t* register_player(int fd, const char *name) {
 
@@ -44,7 +87,7 @@ int remove_lobby(player_t *player, lobby_t *lobby)
         return -1;
     }
 
-    player[index] = player[--player->lobby_count];
+    player->lobby[index] = player->lobby[--player->lobby_count];
     return 0;
 }
 
