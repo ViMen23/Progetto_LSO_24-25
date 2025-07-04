@@ -12,7 +12,7 @@
 
 static atomic_ullong counter = 0;
 
-typedef struct {
+typedef struct player {
     unsigned long long int id;
     char name[NAME_LEN];
     int fd;

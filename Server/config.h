@@ -3,5 +3,6 @@
 
 #define SERVER_PORT 9001
 #define LIS_QUEUE_MAX_SIZE 10
+#define DEBUG 0
 
 #endif

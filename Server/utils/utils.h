@@ -1,7 +1,7 @@
-#ifndef EPOLL_H
-#define EPOLL_H
+#ifndef UTILS_H
+#define UTILS_H
 
-#include <sys/epoll.h>
+#include <stdint.h>
 
 int add_epoll_interest(int epoll_fd, int fd, uint32_t);
 int removeNclean_epoll_interest(int epoll_fd, int fd);

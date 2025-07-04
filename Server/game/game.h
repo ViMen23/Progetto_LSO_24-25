@@ -4,7 +4,7 @@
 #include "game_state.h"
 #include "../external/uthash.h"
 
-typedef struct {
+typedef struct game {
     unsigned long long int id;
     unsigned char board[3][3];
     unsigned char mode;

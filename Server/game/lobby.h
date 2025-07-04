@@ -3,7 +3,7 @@
 
 #include "../external/uthash.h"
 
-typedef struct {
+typedef struct lobby {
     int creator_fd;
     int opponent_fd;
     unsigned long long int id;

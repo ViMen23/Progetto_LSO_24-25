@@ -61,6 +61,6 @@ void stop_playing(player_t *player) {
 static unsigned short find_lobby_pos(lobby_t arr[], lobby_t *to_find, unsigned short size)
 {
     unsigned short i;
-    for(i = 0; i < size || arr[i].id != to_find->id; ++i);
+    for(i = 0; i < size && arr[i].id != to_find->id; ++i);
     return i;
 }
